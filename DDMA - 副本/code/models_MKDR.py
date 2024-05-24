@@ -198,83 +198,6 @@ class MKDR(nn.Module):
         def jaccard(inter, l_cdiag, l_ndiag):
             return inter / min(l_cdiag, l_ndiag)
 
-        def get_patient_memory():
-            #病人当前状态信息
-            cur_diag = input[-1][0]
-            l_cdiag = len(cur_diag)
-            cur_pro = input[-1][1]
-            l_cpro = len(cur_pro)
-            p_id = input[0][3]
-            p_age = input[-1][4]
-            #p_gender = input[-1][5]
-            #初步计算相似度
-            b_patient_memory = []
-            b_diag_memory = []
-            b_pro_memory = []
-            for patient in self.patient_memory:
-                for adm in patient:
-                    if adm[3] != p_id and adm[4] == p_age:
-                        b_patient_memory.append(adm)
-                        b_diag_memory.append(adm[0])
-                        b_pro_memory.append(adm[1])
-            score_diag = []
-            score_pro = []
-            for diag in b_diag_memory:
-                inter = len(set(diag) & set(cur_diag))
-                l_ndiag = len(set(diag))
-                jaccard_score = 0 if inter == 0 else jaccard(inter, l_cdiag, l_ndiag)
-                score_diag.append(jaccard_score)
-            for pro in b_pro_memory:
-                inter = len(set(pro) & set(cur_pro))
-                l_npro = len(set(pro))
-                jaccard_score_ = 0 if inter == 0 else jaccard(inter, l_cpro, l_npro)
-                score_pro.append(jaccard_score_)
-            diagScore = torch.tensor(score_diag).to(self.device)
-            proScore = torch.tensor(score_pro).to(self.device)
-            score = self.a * diagScore + (1 - self.a) * proScore
-            _, topk_indices = torch.topk(score, 10)
-
-            #选出健康状态相似的患者，并算出他们所有visit的表示
-            c_patient_memory = []
-            c_patient_id = set([b_patient_memory[i][3] for i in topk_indices])
-            for patient in self.patient_memory:
-                if patient[0][3] in c_patient_id:
-                    c_patient_memory.append(patient)
-            memoryLength = 0
-            for item in c_patient_memory:
-                memoryLength += len(item)
-            query_memory = []
-            value_memory = torch.zeros(memoryLength, self.vocab_size[2]).to(self.device)
-            id_memory = 0
-            for patient in c_patient_memory:
-                i1_seq = []
-                i2_seq = []
-
-                for idx, adm in enumerate(patient):
-                    src1 = mean_embedding(diagemdding[adm[0]].unsqueeze(dim=0))
-                    src2 = mean_embedding(proemdding[adm[1]].unsqueeze(dim=0))
-                    i1_seq.append(src1)
-                    i2_seq.append(src2)
-
-                    value_memory[id_memory, adm[2]] = 1
-                    id_memory = id_memory + 1
-
-                i1_seq = torch.cat(i1_seq, dim=1)  # (1,seq,dim)
-                i2_seq = torch.cat(i2_seq, dim=1)  # (1,seq,dim)
-
-                o1, h1 = self.encoders[0](
-                        i1_seq
-                    )  # o1:(1, seq, dim*2) hi:(1,1,dim*2)
-                o2, h2 = self.encoders[1](
-                        i2_seq
-                    )
-                o_1, diag_atten = self.MultiHead[0](i1_seq, i1_seq, i1_seq)
-                o_2, pro_atten = self.MultiHead[1](i2_seq, i2_seq, i2_seq)
-                patient_representations1 = torch.cat([o1, o2, o_1, o_2], dim=-1).squeeze(dim=0)  # (seq, dim*4)
-                queries1 = self.query1(patient_representations1)  # (seq, dim)
-                for item in queries1:
-                    query_memory.append(item)
-            query_memory_ = torch.stack(query_memory)
             return query_memory_, value_memory
 
         #采用共现矩阵得到的先验药物
@@ -332,9 +255,6 @@ class MKDR(nn.Module):
                 history_values[idx, adm[2]] = 1
             history_values = torch.FloatTensor(history_values).to(self.device)  # (seq-1, size)
 
-        # 算当前表征匹配药物
-        key_weights1_1 = F.softmax(torch.mm(query1, drug_memory.t()), dim=-1)  # (1, size) 与卷积得到的药物编码算一次权重
-        fact1_1 = torch.mm(key_weights1_1, drug_memory)  # (1, dim)
 
         # 患者历史表征相似度
         if len(input) > 1:
